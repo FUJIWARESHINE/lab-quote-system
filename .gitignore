@@ -1,0 +1,28 @@
+# ---- 构建产物（exe 通过 GitHub Release 分发，不进仓库）----
+build/
+dist/
+*.spec
+
+# ---- 运行时数据（务必不要提交：含真实项目库、客户与报价单）----
+data/
+*.db
+*.db-journal
+*.lock
+port.lock
+
+# ---- 本地工作数据（项目记忆、验证脚本与截图）----
+.workbuddy/
+.tmp-verify/
+.pipcache/
+*.log
+error.log
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>实验室报价系统</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 2v6l-5 9a2 2 0 0 0 1.7 3h12.6A2 2 0 0 0 20 17l-5-9V2"/><path d="M8 2h8"/><path d="M7.5 14h9"/>
+        </svg>
+      </div>
+      <div>
+        <h1>实验室报价系统</h1>
+        <p>LAB QUOTATION</p>
+      </div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar-foot">数据保存在本机 · 支持离线使用</div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h2 id="pageTitle">仪表盘</h2>
+      </div>
+      <div class="topbar-actions" id="topActions"></div>
+    </header>
+    <div class="content" id="view"></div>
+  </div>
+</div>
+<div id="modalRoot"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+<script src="core.js"></script>
+<script src="views.js"></script>
+<script src="quote.js"></script>
+<script>bootstrap();</script>
+</body>
+</html>
