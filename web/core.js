@@ -49,6 +49,7 @@ const STATUS = {
 const state = {
   view: 'dashboard',
   settings: {},
+  systemInfo: {},
   categories: [],
   itemsState: { search: '', category_id: 0, starred: 0, page: 1, page_size: 50, total: 0, rows: [] },
   quotesState: { search: '', status: '', batch: false, rows: [] },
@@ -269,6 +270,26 @@ async function bootstrap() {
   } catch (e) {
     state.settings = {};
   }
+  try {
+    state.systemInfo = await GET('/api/system/info');
+  } catch (e) {
+    state.systemInfo = {};
+  }
+  renderSidebarFoot();
   renderNav();
   go('dashboard');
+}
+
+/** 侧栏底部提示：按当前数据存放模式显示准确文案。 */
+function renderSidebarFoot() {
+  const el = document.getElementById('sidebarFoot');
+  if (!el) return;
+  const mode = (state.systemInfo && state.systemInfo.mode) || '';
+  const map = {
+    docker: '数据保存在服务器 · 挂载卷持久化',
+    custom: '数据保存在自定义目录',
+    portable: '数据随程序存放 · 便携模式',
+    local: '数据保存在本机 · 支持离线使用',
+  };
+  el.textContent = map[mode] || '数据保存在本机 · 支持离线使用';
 }

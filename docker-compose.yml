@@ -1,0 +1,30 @@
+# 实验室报价系统 · Docker Compose 编排
+# 默认使用 GHCR 上已构建好的镜像（无需本地构建）：
+#   docker compose up -d
+# 如需用本地源码自行构建，注释掉 image 一行、启用 build 一行后：
+#   docker compose up -d --build
+# 数据与导出的 Excel 持久化在宿主机 ./data 目录（可改为 NAS 上的绝对路径）。
+services:
+  labquote:
+    image: ghcr.io/fujiwareshine/lab-quote-system:latest
+    # build: .
+    container_name: labquote
+    restart: unless-stopped
+    ports:
+      # 宿主机端口:容器端口（容器内固定 8776）
+      - "8776:8776"
+    environment:
+      TZ: Asia/Shanghai
+      LABQUOTE_HOST: 0.0.0.0
+      LABQUOTE_PORT: "8776"
+      # 数据目录（容器内路径，必须与下方挂载点一致）
+      LABQUOTE_DATA_DIR: /data
+    volumes:
+      # 数据库与 Excel 导出都写在这里；左侧可改成宿主机绝对路径，如 /vol1/docker/labquote/data
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8776/api/health',timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

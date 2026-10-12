@@ -1,17 +1,43 @@
 /* 实验室报价系统 · 页面视图：仪表盘 / 项目库 / 客户 / 报价单 / 设置 */
 'use strict';
 
-function exportDone(path, name) {
-  openModal({
-    title: '导出成功',
-    body: `
-      <p style="font-size:14px;margin-bottom:6px">文件已生成：</p>
-      <p style="font-size:13px;color:var(--text2);word-break:break-all;background:var(--gray-bg);padding:10px 12px;border-radius:10px">${esc(path)}</p>
-      <p class="hint">提示：可直接把该文件通过邮件/微信发送给客户。</p>`,
-    okText: '打开文件夹',
-    cancelText: '关闭',
-    onOk: () => { closeModal(); POST('/api/system/open', { path, select: true }).catch(() => {}); },
+/**
+ * 触发浏览器下载（把 base64 内容存成本地文件）。
+ */
+function downloadBase64(name, b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name || '报价单.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/** 服务器模式导出完成后的提示弹窗（桌面版可打开文件夹）。 */
+function exportDone(path, name) {
+  const inDocker = state.systemInfo && state.systemInfo.mode === 'docker';
+  openModal({
+    title: '已保存到服务器',
+    body: `
+      <p style="font-size:14px;margin-bottom:6px">文件已生成在服务器：</p>
+      <p style="font-size:13px;color:var(--text2);word-break:break-all;background:var(--gray-bg);padding:10px 12px;border-radius:10px">${esc(path)}</p>
+      <p class="hint">${inDocker ? '该目录已挂载到宿主机，可直接从宿主机取用。' : '可直接把该文件通过邮件/微信发送给客户。'}</p>`,
+    okText: inDocker ? '确定' : '打开文件夹',
+    cancelText: '关闭',
+    onOk: () => {
+      closeModal();
+      if (!inDocker) POST('/api/system/open', { path, select: true }).catch(() => {});
+    },
+  });
+  if (inDocker) return;
   const foot = $('#modalRoot .modal-foot');
   if (foot) {
     const btn = document.createElement('button');
@@ -20,6 +46,51 @@ function exportDone(path, name) {
     btn.onclick = () => { closeModal(); POST('/api/system/open', { path }).catch(() => {}); };
     foot.insertBefore(btn, foot.firstChild);
   }
+}
+
+/**
+ * 导出报价单：先让用户选择「下载到本机」还是「保存到服务器」。
+ * @param {number} qid 报价单 ID
+ * @param {Function} [afterLocal] 下载到本机后的回调（如刷新列表）
+ */
+function chooseExportTarget(qid, afterLocal) {
+  openModal({
+    title: '导出报价单',
+    body: `
+      <p style="font-size:14px;margin-bottom:12px">请选择 Excel 报价单的保存位置：</p>
+      <div class="export-choice">
+        <button class="export-opt" id="expLocal">
+          <span class="export-opt-ico">${ICON.download}</span>
+          <span class="export-opt-t">下载到本机</span>
+          <span class="export-opt-d">保存到你当前电脑的下载文件夹</span>
+        </button>
+        <button class="export-opt" id="expServer">
+          <span class="export-opt-ico">${ICON.folder}</span>
+          <span class="export-opt-t">保存到服务器</span>
+          <span class="export-opt-d">生成在服务器的数据目录，供统一取用</span>
+        </button>
+      </div>`,
+    cancelText: '取消',
+    hideOk: true,
+  });
+
+  $('#expLocal').onclick = async () => {
+    closeModal();
+    try {
+      const r = await POST(`/api/quotes/${qid}/export`, { mode: 'local' });
+      downloadBase64(r.name, r.content);
+      toast('已下载到本机：' + r.name, 'success');
+      if (afterLocal) afterLocal();
+    } catch (e) { /* 已提示 */ }
+  };
+  $('#expServer').onclick = async () => {
+    closeModal();
+    try {
+      const r = await POST(`/api/quotes/${qid}/export`, { mode: 'server' });
+      exportDone(r.path, r.name);
+      if (afterLocal) afterLocal();
+    } catch (e) { /* 已提示 */ }
+  };
 }
 
 /* ============================================================ 仪表盘 */
@@ -113,12 +184,8 @@ VIEWS.dashboard = async function () {
   const newBtn = $('#btnNewQuote');
   if (newBtn) newBtn.onclick = () => openQuoteEditor(null);
   $$('[data-edit]').forEach(b => b.onclick = () => openQuoteEditor(Number(b.dataset.edit)));
-  $$('[data-export]').forEach(b => b.onclick = async () => {
-    try {
-      const r = await POST(`/api/quotes/${b.dataset.export}/export`, {});
-      exportDone(r.path, r.name);
-      go('dashboard');
-    } catch (e) { /* 已提示 */ }
+  $$('[data-export]').forEach(b => b.onclick = () => {
+    chooseExportTarget(Number(b.dataset.export), () => go('dashboard'));
   });
 };
 
@@ -514,12 +581,8 @@ async function renderQuotes() {
     toast('已复制为新报价单', 'success');
     renderQuotes();
   });
-  $$('[data-export]', $('#quoteBody')).forEach(b => b.onclick = async () => {
-    try {
-      const r = await POST(`/api/quotes/${b.dataset.export}/export`, {});
-      exportDone(r.path, r.name);
-      renderQuotes();
-    } catch (e) { /* 已提示 */ }
+  $$('[data-export]', $('#quoteBody')).forEach(b => b.onclick = () => {
+    chooseExportTarget(Number(b.dataset.export), () => renderQuotes());
   });
   $$('[data-del]', $('#quoteBody')).forEach(b => b.onclick = () => {
     confirmBox('确定删除该报价单吗？删除后不可恢复。', async () => {
@@ -625,6 +688,7 @@ VIEWS.settings = async function () {
   } catch (e) { return; }
   state.settings = s;
   const portable = info.mode === 'portable';
+  const modeLabel = { docker: '容器模式', portable: '随身模式', local: '本机模式', custom: '共享目录' }[info.mode] || '本机模式';
   $('#view').innerHTML = `
     <div class="settings-grid">
       <div>
@@ -672,15 +736,20 @@ VIEWS.settings = async function () {
         <div class="card">
           <div class="card-head">
             <h3>数据位置与共享</h3>
-            <span class="badge ${portable ? 'on' : 'off'}">${portable ? '随身模式' : '本机模式'}</span>
+            <span class="badge ${portable || info.mode === 'docker' ? 'on' : 'off'}">${modeLabel}</span>
           </div>
           <div class="card-body">
             <div style="font-size:12px;color:var(--text2);word-break:break-all;background:var(--gray-bg);padding:10px 12px;border-radius:10px">${esc(info.db_path)}</div>
             <div class="hint" style="margin-top:10px;line-height:1.9">
+              ${info.mode === 'docker' ? `
+              <b>容器模式</b>：数据保存在容器挂载的目录（LABQUOTE_DATA_DIR，通常映射到宿主机卷）。所有数据与导出的 Excel 都持久化在宿主机上，重建容器不会丢失。数据目录由部署配置固定，如需修改请编辑 docker-compose.yml 的挂载路径。<br>
+              ` : `
               <b>本机模式</b>：数据只存于这台电脑，把程序发给同事需先「立即备份」，让他用「恢复数据库」导入。<br>
               <b>随身模式</b>：数据保存在程序目录的 data 文件夹，把<b>整个程序文件夹</b>压缩发给同事，他双击即可用你设置好的项目与单价报价。<br>
-              <b>共享目录</b>：把数据指到公司共享盘或网盘同步文件夹，多人共用同一份数据，改动互相可见。
+              <b>共享目录</b>：把数据指到公司共享盘或网盘同步文件夹，多人共用同一份数据，改动互相可见。<br>
+              `}
             </div>
+            ${info.mode === 'docker' ? '' : `
             <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
               ${info.mode === 'local' ? `<button class="btn btn-accent btn-sm" id="btnPortable">${ICON.folder}把数据存到程序目录（随身）</button>` : ''}
               ${info.mode !== 'local' ? `<button class="btn btn-ghost btn-sm" id="btnLocal">切换回本机模式</button>` : ''}
@@ -694,6 +763,7 @@ VIEWS.settings = async function () {
               <button class="btn btn-primary" id="btnCustom">应用</button>
             </div>
             <div class="hint">切换会把当前数据复制到新目录。共享盘请避免多人同时编辑同一份报价单。</div>
+            `}
           </div>
         </div>
         <div class="card">
@@ -731,14 +801,16 @@ VIEWS.settings = async function () {
     const r = await POST('/api/system/mode', { mode: 'portable' });
     confirmBox(`已切换为随身模式，数据存于：<br><b>${esc(r.data_dir)}</b><br><br>把整个程序文件夹压缩发给同事即可。建议现在重启程序。`, () => VIEWS.settings());
   };
-  $('#btnPackage').onclick = async () => {
+  const pkgBtn = $('#btnPackage');
+  if (pkgBtn) pkgBtn.onclick = async () => {
     toast('正在打包，请稍候…');
     try {
       const r = await POST('/api/system/package', {});
       exportDone(r.path, r.name);
     } catch (e) { /* 已提示 */ }
   };
-  $('#btnCustom').onclick = async () => {
+  const cu = $('#btnCustom');
+  if (cu) cu.onclick = async () => {
     const p = $('#customDir').value.trim();
     if (!p) return toast('请填写数据目录路径', 'warn');
     const r = await POST('/api/system/mode', { mode: 'custom', path: p });

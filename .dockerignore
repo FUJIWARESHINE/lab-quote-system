@@ -1,0 +1,22 @@
+# 构建上下文排除项：镜像只需 app/ 与 web/
+.git
+.gitignore
+.github/
+build/
+dist/
+data/
+.tmp-verify/
+.workbuddy/
+__pycache__/
+*.py[cod]
+*.db
+*.db-journal
+*.lock
+port.lock
+*.log
+error.log
+*.md
+*.xlsx
+*.spec
+# 图标文件需随 app/ 一起进镜像（/favicon.ico 路由会读取 app/icon.ico），
+# 因此这里不能写 *.ico；web/ 下的 favicon.png / apple-touch-icon.png 也同理。

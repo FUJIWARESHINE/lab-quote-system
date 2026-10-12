@@ -1,0 +1,8 @@
+# 二进制文件不做换行/编码转换
+*.png  binary
+*.ico  binary
+*.xlsx binary
+*.db   binary
+
+# 文本文件统一以 LF 存入仓库（工作区在 Windows 下可保持 CRLF）
+* text=auto

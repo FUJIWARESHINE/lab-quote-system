@@ -147,7 +147,9 @@ DEFAULT_SETTINGS = {
     "default_tax_rate": "0",
     "default_discount_rate": "0",
     "valid_days": "30",
-    "export_dir": os.path.join(os.path.expanduser("~"), "Documents", "实验室报价单"),
+    # Docker 模式下留空，由 resolve_export_dir 统一指到挂载卷；Windows 下默认文档目录
+    "export_dir": "" if os.environ.get("LABQUOTE_DATA_DIR") else
+                  os.path.join(os.path.expanduser("~"), "Documents", "实验室报价单"),
     "terms": _add_terms_rule(LEGACY_TERMS),
 }
 
@@ -166,10 +168,26 @@ DEFAULT_ITEMS = [
 
 
 def get_app_dir() -> str:
-    """程序所在目录（打包后为 exe 所在目录）。"""
+    """程序所在目录（打包后为 exe 所在目录；Docker 下为容器内应用根目录）。"""
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def env_data_dir() -> str | None:
+    """环境变量指定的数据目录（Docker/服务器部署用）。
+
+    设置 LABQUOTE_DATA_DIR 后，数据目录由它决定，优先级高于随身模式与本机模式；
+    容器里通常指向挂载卷（如 /data），从而把数据库与导出文件持久化到宿主机。
+    """
+    value = (os.environ.get("LABQUOTE_DATA_DIR") or "").strip()
+    if not value:
+        return None
+    try:
+        os.makedirs(value, exist_ok=True)
+    except Exception:
+        return None
+    return value
 
 
 def get_local_data_dir() -> str:
@@ -241,7 +259,10 @@ def is_portable() -> bool:
 
 
 def get_data_dir() -> str:
-    """自定义目录（共享盘）> 随身模式（程序同目录有数据）> 本机用户目录。"""
+    """环境变量（Docker）> 自定义目录（共享盘）> 随身模式 > 本机用户目录。"""
+    env = env_data_dir()
+    if env:
+        return env
     custom = custom_dir()
     if custom:
         os.makedirs(custom, exist_ok=True)
@@ -255,6 +276,29 @@ def get_data_dir() -> str:
 
 def get_db_path() -> str:
     return os.path.join(get_data_dir(), "labquote.db")
+
+
+def resolve_export_dir(configured: str = "") -> str:
+    """把设置里的导出目录解析为当前环境可用目录。
+
+    - Docker 模式：统一导出到数据目录（挂载卷），避免出现 Windows 路径或容器临时层；
+    - 其他环境：沿用用户配置，不可写时回退到数据目录。
+    """
+    if env_data_dir():
+        target = os.path.join(env_data_dir(), "导出报价单")
+        os.makedirs(target, exist_ok=True)
+        return target
+    candidate = (configured or "").strip()
+    if candidate:
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            if _writable(candidate):
+                return candidate
+        except Exception:
+            pass
+    fallback = os.path.join(get_data_dir(), "导出报价单")
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
 
 
 def _copy_db(src: str, dst: str) -> None:
@@ -271,8 +315,14 @@ def _copy_db(src: str, dst: str) -> None:
 
 
 def data_info() -> dict:
+    env = env_data_dir()
     custom = custom_dir()
-    mode = "custom" if custom else ("portable" if is_portable() else "local")
+    if env:
+        mode = "docker"
+    elif custom:
+        mode = "custom"
+    else:
+        mode = "portable" if is_portable() else "local"
     return {
         "mode": mode,
         "data_dir": get_data_dir(),
@@ -282,11 +332,18 @@ def data_info() -> dict:
         "local_dir": get_local_data_dir(),
         "db_exists": os.path.exists(get_db_path()),
         "has_seed": has_seed(),
+        "readonly_mode": bool(env),  # Docker 模式下数据目录由环境变量固定
     }
 
 
 def switch_mode(mode: str, path: str = "") -> dict:
-    """切换数据存放位置：本机目录 / 程序目录（随身）/ 自定义目录（共享盘）。"""
+    """切换数据存放位置：本机目录 / 程序目录（随身）/ 自定义目录（共享盘）。
+
+    Docker 模式下数据目录由 LABQUOTE_DATA_DIR 固定（挂载卷），不允许在界面里切换，
+    否则数据会写到容器临时层、容器重建即丢失。
+    """
+    if env_data_dir():
+        raise ValueError("容器部署下数据目录由挂载卷固定，请在 docker-compose 中调整挂载路径")
     src = get_db_path()
     if mode == "custom":
         if not path:

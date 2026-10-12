@@ -1,4 +1,5 @@
-# ---- 构建产物（exe 通过 GitHub Release 分发，不进仓库）----
+# ---- 本地遗留产物（桌面版 exe 打包物；不进仓库）----
+# ⚠️ dist/data/labquote.db 为正式业务数据，务必保持忽略、绝不提交
 build/
 dist/
 *.spec

@@ -132,7 +132,8 @@ def _fill(ws, cell_range, value=None, font=None, fill=None, align=None, border=N
 
 
 # ------------------------------------------------------------------ 报价单
-def export_quote(quote: dict, settings: dict) -> str:
+def _build_quote_workbook(quote: dict, settings: dict) -> Workbook:
+    """按报价单内容构建 Excel 工作簿（不落盘）。"""
     wb = Workbook()
     ws = wb.active
     ws.title = "报价单"
@@ -396,12 +397,37 @@ def export_quote(quote: dict, settings: dict) -> str:
     ws[f"E{row}"].alignment = Alignment(horizontal="left", vertical="center")
     ws.row_dimensions[row].height = 22
 
-    save_dir = settings.get("export_dir") or os.path.join(os.path.expanduser("~"), "Documents", "实验室报价单")
-    os.makedirs(save_dir, exist_ok=True)
+    return wb
+
+
+def quote_filename(quote: dict) -> str:
+    """报价单 Excel 的标准文件名。"""
     safe_customer = re.sub(r'[\\/:*?"<>|]', "_", (quote.get("customer_name") or "客户"))[:20]
     no = quote.get("quote_no") or datetime.now().strftime("%Y%m%d")
-    filename = f"报价单_{safe_customer}_{no}.xlsx"
-    path = os.path.join(save_dir, filename)
+    return f"报价单_{safe_customer}_{no}.xlsx"
+
+
+def quote_workbook(quote: dict, settings: dict) -> Workbook:
+    """按报价单内容构建 Excel 工作簿对象（内存中，不落盘）。"""
+    return _build_quote_workbook(quote, settings)
+
+
+def quote_bytes(quote: dict, settings: dict) -> tuple:
+    """在内存中生成报价单 Excel，返回 (bytes, filename)。"""
+    import io
+
+    wb = _build_quote_workbook(quote, settings)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), quote_filename(quote)
+
+
+def export_quote(quote: dict, settings: dict) -> str:
+    """生成报价单 Excel 并保存到服务器导出目录，返回文件路径。"""
+    wb = _build_quote_workbook(quote, settings)
+    save_dir = db.resolve_export_dir(settings.get("export_dir"))
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, quote_filename(quote))
     wb.save(path)
     return path
 

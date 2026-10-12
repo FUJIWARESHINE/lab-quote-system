@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import zipfile
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -51,13 +52,22 @@ def find_free_port(start: int = 8765, tries: int = 60) -> int:
 
 
 def open_path(path: str, select: bool = False) -> None:
+    """在图形环境中打开文件/目录；服务器（Docker/Linux）无桌面时优雅降级。
+
+    容器里没有 explorer / startfile，也没有可弹出的桌面，此时直接返回失败原因，
+    前端只提示路径，不报连接错误。
+    """
     path = os.path.abspath(path)
-    if select:
-        subprocess.Popen(["explorer", "/select,", path])
-    elif os.path.isdir(path):
-        os.startfile(path)
-    else:
-        os.startfile(path)
+    try:
+        if os.name == "nt":
+            if select:
+                subprocess.Popen(["explorer", "/select,", path])
+            else:
+                os.startfile(path)
+        else:
+            subprocess.Popen(["xdg-open", path])
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"当前运行环境无法打开文件管理器（{exc}）") from exc
 
 
 def ok(data=None, **extra):
@@ -224,15 +234,26 @@ def api_duplicate_quote(_q, _b, qid):
     return ok({"id": new_id})
 
 
-def api_export_quote(_q, _b, qid):
+def api_export_quote(_q, body, qid):
+    """导出报价单 Excel。
+
+    mode = "server"（默认）：保存到服务器数据目录，返回路径；
+    mode = "local"：在内存生成，交给前端下载到本机（不落服务器）。
+    """
     quote = db.get_quote(qid)
     if not quote:
         return fail("报价单不存在", 404)
     if not quote.get("items"):
         return fail("报价单没有明细，无法导出")
+    mode = (body or {}).get("mode") or "server"
+    if mode == "local":
+        data, filename = export_excel.quote_bytes(quote, db.get_settings())
+        db.update_quote(qid, {"status": "sent"})
+        return ok({"name": filename, "content": base64.b64encode(data).decode("ascii"),
+                   "mode": "local"})
     path = export_excel.export_quote(quote, db.get_settings())
     db.update_quote(qid, {"status": "sent"})
-    return ok({"path": path, "name": os.path.basename(path)})
+    return ok({"path": path, "name": os.path.basename(path), "mode": "server"})
 
 
 def api_get_settings(_q, _b):
@@ -247,12 +268,19 @@ def api_open(_q, body):
     path = body.get("path") or ""
     if not path or not os.path.exists(path):
         return fail("文件不存在：" + path)
-    open_path(path, select=bool(body.get("select")))
-    return ok(True)
+    try:
+        open_path(path, select=bool(body.get("select")))
+    except Exception as exc:  # noqa: BLE001
+        # 容器/无桌面环境下无法弹出文件管理器，但文件确实已生成，返回路径即可
+        return ok({"path": path, "opened": False, "message": str(exc)})
+    return ok({"path": path, "opened": True})
 
 
 def api_open_data_dir(_q, _b):
-    open_path(db.get_data_dir())
+    try:
+        open_path(db.get_data_dir())
+    except Exception:  # noqa: BLE001
+        pass
     return ok({"path": db.get_data_dir()})
 
 
@@ -268,9 +296,26 @@ def api_system_mode(_q, body):
 
 
 def api_package(_q, _b):
-    """把程序与当前数据打包成一个 zip，便于整体发给同事。"""
+    """把程序与当前数据打包成一个 zip，便于整体发给同事。
+
+    Docker 部署下没有单文件 exe，改为携带 docker-compose.yml 与数据的一键部署包。
+    """
     if not getattr(sys, "frozen", False):
-        return fail("此功能仅打包后的 exe 支持")
+        # 容器/源码部署：打包 compose 文件 + 当前数据库
+        src_db = db.get_db_path()
+        if not os.path.exists(src_db):
+            return fail("尚未创建数据库，请先使用一次程序")
+        compose_src = os.path.join(db.get_app_dir(), "docker-compose.yml")
+        name = f"实验室报价系统_容器部署包_{datetime.now():%Y%m%d}.zip"
+        path = os.path.join(db.get_data_dir(), name)
+        try:
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+                if os.path.exists(compose_src):
+                    z.write(compose_src, "docker-compose.yml")
+                z.write(src_db, os.path.join("data", "labquote.db"))
+        except Exception as exc:  # noqa: BLE001
+            return fail(f"打包失败：{exc}")
+        return ok({"path": path, "name": name})
     src_db = db.get_db_path()
     if not os.path.exists(src_db):
         return fail("尚未创建数据库，请先使用一次程序")
@@ -330,7 +375,17 @@ def api_quote_preview(_q, body):
     ))
 
 
+def api_health(_q, _b):
+    """健康检查（Docker HEALTHCHECK 用）。"""
+    return ok({
+        "status": "ok",
+        "data_dir": db.get_data_dir(),
+        "db_exists": os.path.exists(db.get_db_path()),
+    })
+
+
 ROUTES = [
+    ("GET", re.compile(r"^/api/health$"), api_health),
     ("GET", re.compile(r"^/api/dashboard$"), api_dashboard),
     ("GET", re.compile(r"^/api/categories$"), api_list_categories),
     ("POST", re.compile(r"^/api/categories$"), api_create_category),
@@ -451,9 +506,20 @@ class Handler(BaseHTTPRequestHandler):
     def _static(self, path: str):
         if path in ("/", ""):
             path = "/index.html"
+        # 浏览器默认请求 /favicon.ico：映射到应用图标
+        if path.rstrip("/") == "/favicon.ico":
+            full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
+            if os.path.isfile(full):
+                with open(full, "rb") as f:
+                    return self._send(200, f.read(), "image/x-icon")
         rel = path.lstrip("/").replace("/", os.sep)
         full = resource_path(os.path.join("web", rel))
         if not os.path.isfile(full):
+            # 静态资源缺失：不返回 HTML（避免浏览器把 HTML 当图片/脚本）；
+            # 仅无扩展名的前端路由才回退到 index.html
+            ext = os.path.splitext(path)[1].lower()
+            if ext and ext not in (".html", ".htm"):
+                return self._send(404, b"Not Found", "text/plain; charset=utf-8")
             full = resource_path(os.path.join("web", "index.html"))
         ext = os.path.splitext(full)[1].lower()
         with open(full, "rb") as f:
@@ -461,10 +527,34 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, content, MIME.get(ext, "application/octet-stream"))
 
 
-def start_server(port: int | None = None) -> tuple[ThreadingHTTPServer, int]:
+def start_server(port: int | None = None, host: str | None = None) -> tuple[ThreadingHTTPServer, int]:
     db.init_db()
-    port = port or find_free_port()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    if port is None:
+        env_port = os.environ.get("PORT") or os.environ.get("LABQUOTE_PORT")
+        port = int(env_port) if env_port and env_port.isdigit() else find_free_port()
+    if host is None:
+        # Docker/服务器部署需监听 0.0.0.0 才能被外部访问；默认仍绑定本机
+        host = os.environ.get("LABQUOTE_HOST") or "127.0.0.1"
+    httpd = ThreadingHTTPServer((host, port), Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     return httpd, port
+
+
+def main() -> None:
+    """独立服务入口（Docker / 服务器部署）：python app/server.py。"""
+    httpd, port = start_server()
+    host = os.environ.get("LABQUOTE_HOST") or "127.0.0.1"
+    print(f"实验室报价系统服务已启动：http://{host}:{port}/index.html", flush=True)
+    print(f"数据目录：{db.get_data_dir()}", flush=True)
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.shutdown()
+
+
+if __name__ == "__main__":
+    main()

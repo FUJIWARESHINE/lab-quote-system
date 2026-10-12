@@ -1204,8 +1204,8 @@ async function saveQuote(andExport) {
     }
     toast('报价单已保存', 'success');
     if (andExport) {
-      const r = await POST(`/api/quotes/${q.id}/export`, {});
-      exportDone(r.path, r.name);
+      chooseExportTarget(q.id, () => go('quotes'));
+      return;
     }
     go('quotes');
   } catch (e) { /* 已提示 */ }
