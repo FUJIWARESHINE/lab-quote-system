@@ -47,6 +47,9 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
+          labels: |
+            org.opencontainers.image.title=实验室报价系统
+            org.opencontainers.image.description=检测报价管理：项目库 / 客户 / 报价单 / Excel 导出（Docker 容器版）
 
       - name: Build and push
         id: build
