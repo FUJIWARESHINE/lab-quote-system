@@ -244,6 +244,32 @@ function formData(mask) {
   return obj;
 }
 
+/* ------------------------------------------------------------ 主题（明亮 / 深色） */
+const THEME_KEY = 'lq-theme';
+
+function getTheme() {
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+}
+
+function setTheme(t, persist) {
+  document.documentElement.dataset.theme = t;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', t === 'dark' ? '#070b16' : '#e9eef7');
+  if (persist !== false) {
+    try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* 隐私模式下忽略 */ }
+  }
+}
+
+function bindThemeToggle() {
+  const btn = document.getElementById('themeToggle');
+  if (!btn) return;
+  setTheme(getTheme(), false);
+  btn.addEventListener('click', () => {
+    const next = getTheme() === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+  });
+}
+
 /* ------------------------------------------------------------ 路由 */
 function renderNav() {
   $('#nav').innerHTML = NAV.map(n =>
@@ -259,6 +285,10 @@ function go(view) {
   state.view = view;
   renderNav();
   const viewEl = $('#view');
+  // iOS 风格推入动画：先重置再触发，保证连续切换也重播
+  viewEl.classList.remove('view-anim');
+  void viewEl.offsetWidth;
+  viewEl.classList.add('view-anim');
   viewEl.innerHTML = '<div class="loading">加载中…</div>';
   setActions('');
   (VIEWS[view] || VIEWS.dashboard)();
@@ -275,6 +305,7 @@ async function bootstrap() {
   } catch (e) {
     state.systemInfo = {};
   }
+  bindThemeToggle();
   renderSidebarFoot();
   renderNav();
   go('dashboard');

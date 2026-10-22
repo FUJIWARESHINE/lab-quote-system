@@ -8,7 +8,15 @@
 <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
-<meta name="theme-color" content="#2563eb">
+<meta name="theme-color" content="#e9eef7">
+<script>
+/* 主题预置：在样式表生效前把主题写到 <html>，避免刷新时闪白/闪黑 */
+(function () {
+  var t = 'light';
+  try { t = localStorage.getItem('lq-theme') === 'dark' ? 'dark' : 'light'; } catch (e) { /* 隐私模式默认明亮 */ }
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -33,7 +41,17 @@
       <div>
         <h2 id="pageTitle">仪表盘</h2>
       </div>
-      <div class="topbar-actions" id="topActions"></div>
+      <div class="topbar-actions">
+        <button class="theme-toggle" id="themeToggle" title="切换明亮 / 深色主题" aria-label="切换主题">
+          <svg class="ico-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+          <svg class="ico-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+        <div id="topActions"></div>
+      </div>
     </header>
     <div class="content" id="view"></div>
   </div>

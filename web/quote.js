@@ -262,7 +262,7 @@ function renderPickList() {
     <div class="pick-item" data-add="${i.id}">
       <button class="btn btn-icon" data-star-item="${i.id}" data-on="${i.starred ? 1 : 0}"
         title="${i.starred ? '取消收藏' : '收藏置顶'}"
-        style="background:none;border:none;padding:0;width:22px;height:22px;color:${i.starred ? '#f59e0b' : '#cbd5e1'}">
+        style="background:none;border:none;padding:0;width:22px;height:22px;color:${i.starred ? '#f59e0b' : 'var(--text3)'}">
         ${i.starred ? ICON.starOn : ICON.star}</button>
       <div class="pi-body">
         <div class="pi-name" title="${esc(i.name)}">${esc(i.name)}</div>

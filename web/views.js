@@ -207,7 +207,7 @@ async function renderItemsPage() {
       <td class="center" style="width:38px"><input type="checkbox" class="ck" value="${r.id}" style="width:15px;height:15px"></td>
       <td class="center" style="width:46px">
         <button class="btn btn-icon" data-star="${r.id}" data-on="${r.starred ? 1 : 0}" title="${r.starred ? '取消收藏' : '收藏置顶'}"
-          style="background:none;border:none;color:${r.starred ? '#f59e0b' : '#cbd5e1'}">${r.starred ? ICON.starOn : ICON.star}</button>
+          style="background:none;border:none;color:${r.starred ? '#f59e0b' : 'var(--text3)'}">${r.starred ? ICON.starOn : ICON.star}</button>
       </td>
       <td style="font-variant-numeric:tabular-nums;color:var(--text2)">${esc(r.code || '—')}</td>
       <td style="font-weight:600">${esc(r.name)}</td>
