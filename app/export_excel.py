@@ -91,6 +91,26 @@ def _upper_rmb(amount) -> str:
     return ("负" + text) if neg else text
 
 
+def _num_literal(value) -> str:
+    """把数字转成可直接写进 Excel 公式的字面量（去掉多余的 0）。"""
+    text = f"{float(value or 0):.6f}".rstrip("0").rstrip(".")
+    return text if text not in ("", "-") else "0"
+
+
+def _rmb_formula(cell_ref: str, static_text: str,
+                 label: str = "金额合计（大写）：") -> str:
+    """生成「大写金额随金额单元格自动变化」的公式。
+
+    用中文版 Excel / WPS 内置的隐藏函数 NUMBERSTRING(金额,2) 直接得到人民币
+    大写（含「元角分整」）；在拿不到该函数的环境（英文版 Excel、部分在线
+    表格）里 IFERROR 会退回导出时算好的静态大写文本，不会出现 #NAME?。
+    """
+    return (
+        f'=IFERROR("{label}"&NUMBERSTRING(ROUND({cell_ref},2),2),'
+        f'"{label}{static_text}")'
+    )
+
+
 def _wrap_lines(text: str, units_per_line: float) -> int:
     """估算文本在给定列宽（字符数）下换行后的实际行数（中文按约 2 个字符宽计）。"""
     total = 0
@@ -135,6 +155,8 @@ def _fill(ws, cell_range, value=None, font=None, fill=None, align=None, border=N
 def _build_quote_workbook(quote: dict, settings: dict) -> Workbook:
     """按报价单内容构建 Excel 工作簿（不落盘）。"""
     wb = Workbook()
+    # 文件里的金额/大写是公式（无缓存值），打开时强制整表重算，避免显示空白或旧值
+    wb.calculation.fullCalcOnLoad = True
     ws = wb.active
     ws.title = "报价单"
     cols = {"A": 6, "B": 14, "C": 23, "D": 19, "E": 7, "F": 10, "G": 9,
@@ -229,6 +251,7 @@ def _build_quote_workbook(quote: dict, settings: dict) -> Workbook:
         ws.row_dimensions[r].height = 30
 
     items = quote.get("items") or []
+    section_rows = []  # 各模块小计所在行，供合计公式引用
     if not items:
         write_head(row)
         row += 1
@@ -262,14 +285,17 @@ def _build_quote_workbook(quote: dict, settings: dict) -> Workbook:
             write_head(row)
             row += 1
 
-            section_total = 0.0
+            first_item_row = row
             for local_idx, it in enumerate(grouped[sec_name], start=1):
                 seq += 1
                 qty = float(it.get("quantity") or 0)
                 price = float(it.get("price") or 0)
                 dr = float(it.get("discount_rate") or 0)
-                amount = round(price * qty * (1 - dr / 100), 2)
-                section_total += amount
+                # 金额写公式：改「合计数量」或「单价」后金额、小计、合计与大写自动跟着变
+                amount = f"=ROUND(J{row}*K{row}"
+                if dr:
+                    amount += f"*(1-{_num_literal(dr)}/100)"
+                amount += ",2)"
                 note = it.get("note") or ""
                 values = [
                     seq, it.get("code") or "", it.get("name") or "", it.get("spec") or "",
@@ -310,25 +336,40 @@ def _build_quote_workbook(quote: dict, settings: dict) -> Workbook:
             ws[f"A{row}"] = f"{sec_name}  小计"
             ws[f"A{row}"].font = Font(name=FONT, size=10, bold=True)
             ws[f"A{row}"].alignment = Alignment(horizontal="right", vertical="center")
-            st = ws.cell(row=row, column=12, value=round(section_total, 2))
+            st = ws.cell(row=row, column=12,
+                         value=f"=SUM(L{first_item_row}:L{row - 1})")
             st.font = Font(name=FONT, size=10, bold=True, color=BLUE)
             st.number_format = "#,##0.00"
             st.alignment = Alignment(horizontal="right", vertical="center")
             for col in range(1, total_cols + 1):
                 ws.cell(row=row, column=col).border = BORDER
             ws.row_dimensions[row].height = 20
+            section_rows.append(row)
             row += 1
 
     subtotal = float(quote.get("subtotal") or 0)
     discount_amount = float(quote.get("discount_amount") or 0)
     tax_amount = float(quote.get("tax_amount") or 0)
     total = float(quote.get("total") or 0)
+    discount_rate = float(quote.get("discount_rate") or 0)
+    tax_rate = float(quote.get("tax_rate") or 0)
+
+    # 合计与折扣/税额说明也写公式，算法与 db.calc_totals 保持一致：
+    # 小计=各模块小计之和 → 折扣=小计×折扣率 → 税额=(小计-折扣)×税率 → 合计=小计-折扣+税额
+    if section_rows:
+        sub_expr = "ROUND(" + "+".join(f"L{r}" for r in section_rows) + ",2)"
+        disc_expr = f"ROUND({sub_expr}*{_num_literal(discount_rate)}/100,2)"
+        base_expr = f"ROUND({sub_expr}-{disc_expr},2)"
+        tax_expr = f"ROUND({base_expr}*{_num_literal(tax_rate)}/100,2)"
+        total_expr = f"ROUND({base_expr}+{tax_expr},2)"
+    else:
+        sub_expr = disc_expr = tax_expr = total_expr = ""
 
     ws.merge_cells(f"A{row}:K{row}")
-    ws[f"A{row}"] = f"金额合计（大写）：{_upper_rmb(total)}"
+    ws[f"A{row}"] = _rmb_formula(f"L{row}", _upper_rmb(total))
     ws[f"A{row}"].font = Font(name=FONT, size=11, bold=True)
     ws[f"A{row}"].alignment = Alignment(horizontal="right", vertical="center")
-    tc = ws.cell(row=row, column=12, value=total)
+    tc = ws.cell(row=row, column=12, value=f"={total_expr}" if total_expr else total)
     tc.font = Font(name=FONT, size=11, bold=True, color="C00000")
     tc.number_format = "#,##0.00"
     tc.alignment = Alignment(horizontal="right", vertical="center")
@@ -338,10 +379,20 @@ def _build_quote_workbook(quote: dict, settings: dict) -> Workbook:
     ws.row_dimensions[row].height = 24
     row += 1
 
-    note = (
-        f"小计：¥ {subtotal:,.2f}    折扣（{float(quote.get('discount_rate') or 0):g}%）："
-        f"-¥ {discount_amount:,.2f}    税额（{float(quote.get('tax_rate') or 0):g}%）：¥ {tax_amount:,.2f}"
-    )
+    if total_expr:
+        # 折扣率/税率是报价单上的固定值，直接写成文字；只有金额部分用公式联动
+        note = (
+            f'="小计：¥ "&TEXT({sub_expr},"#,##0.00")'
+            f'&"    折扣（{discount_rate:g}%）：-¥ "'
+            f'&TEXT({disc_expr},"#,##0.00")'
+            f'&"    税额（{tax_rate:g}%）：¥ "'
+            f'&TEXT({tax_expr},"#,##0.00")'
+        )
+    else:
+        note = (
+            f"小计：¥ {subtotal:,.2f}    折扣（{discount_rate:g}%）："
+            f"-¥ {discount_amount:,.2f}    税额（{tax_rate:g}%）：¥ {tax_amount:,.2f}"
+        )
     ws.merge_cells(f"A{row}:{last}{row}")
     ws[f"A{row}"] = note
     ws[f"A{row}"].font = Font(name=FONT, size=9, color="555555")
