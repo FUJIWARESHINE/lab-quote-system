@@ -328,7 +328,8 @@ function customItemDialog() {
     <div class="grid2">
       ${field('项目名称 *', input('name', '', 'placeholder="客户临时提出的检测项目"'))}
       ${field('单位', unitField('cuUnit', '样'))}
-      ${field('单价（元）*', `<input class="input money" name="price" type="number" step="0.01" min="0" placeholder="0.00">`)}
+      ${field('单价（元）*', `<input class="input money" name="price" type="number" step="0.01" min="0" placeholder="0.00">`,
+        '客户提供 / 不收费的项目填 0 即可，仍会正常列入报价单')}
       ${field('归属模块/部分', input('section', section, 'placeholder="默认加入当前模块"'))}
       ${field('分组数（乘数）', `<input class="input" name="group_count" type="number" step="1" min="1" value="1">`)}
       ${field('数量（每组样本数）', `<input class="input" name="samples" type="number" step="1" min="0" value="1">`)}
@@ -386,7 +387,11 @@ function readCustomForm(mask) {
 
 function validateCustom(d) {
   if (!d.name || !d.name.trim()) { toast('请填写项目名称', 'warn'); return true; }
-  if (d.price === '' || Number(d.price) <= 0) { toast('请填写单价', 'warn'); return true; }
+  // 单价允许为 0：客户提供的项目不收费，但仍要列出来
+  const raw = String(d.price === undefined || d.price === null ? '' : d.price).trim();
+  if (raw === '') { toast('请填写单价（客户提供 / 不收费的项目填 0）', 'warn'); return true; }
+  const price = Number(raw);
+  if (!isFinite(price) || price < 0) { toast('单价不能为负数', 'warn'); return true; }
   return false;
 }
 
