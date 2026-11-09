@@ -218,6 +218,56 @@ function confirmBox(msg, onOk, danger) {
     if (okBtn) okBtn.className = 'btn btn-danger-solid';
   }
 }
+/* 应用内输入弹窗，替代原生 prompt（原生 prompt 在 iframe / 嵌入式预览里会被浏览器
+   静默拦掉，或用户勾过「阻止此页面创建更多对话框」后永久失效，表现为点了按钮没反应）。
+   返回 Promise：确定 → 去空格的字符串；取消 / 关闭 / 点遮罩 → null */
+function promptInput(opt) {
+  const o = opt || {};
+  const emptyTip = o.emptyTip || '名称不能为空';
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const read = () => {
+      const el = $('#promptInput');
+      return el ? el.value.trim() : '';
+    };
+    const mask = openModal({
+      title: o.title || '请输入',
+      okText: o.okText || '确定',
+      body: `
+        <div class="field">
+          <label>${esc(o.label || '名称')}</label>
+          <input class="input" id="promptInput" value="${esc(o.value || '')}" placeholder="${esc(o.placeholder || '')}">
+          ${o.hint ? `<div class="hint">${esc(o.hint)}</div>` : ''}
+        </div>`,
+      onOk: () => {
+        const v = read();
+        if (!v) return toast(emptyTip, 'warn');
+        done(v);
+        closeModal();
+      },
+    });
+    const inp = mask.querySelector('#promptInput');
+    if (inp) {
+      inp.onkeydown = (e) => {
+        if (e.key !== 'Enter' || e.isComposing) return;
+        e.preventDefault();
+        const v = read();
+        if (!v) return toast(emptyTip, 'warn');
+        done(v);
+        closeModal();
+      };
+      setTimeout(() => inp.select(), 60);
+    }
+    // 弹窗被关掉（取消 / 右上角 × / 点遮罩）→ 视为取消
+    const root = $('#modalRoot');
+    const obs = new MutationObserver(() => {
+      if (!document.body.contains(mask)) { obs.disconnect(); done(null); }
+    });
+    obs.observe(root, { childList: true });
+  });
+}
+
 function field(label, inner, hint) {
   return `<div class="field"><label>${esc(label)}</label>${inner}${hint ? `<div class="hint">${esc(hint)}</div>` : ''}</div>`;
 }

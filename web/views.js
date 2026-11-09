@@ -449,7 +449,7 @@ function categoryDialog() {
     };
     $$('[data-edit]', mask).forEach(b => b.onclick = async () => {
       const c = state.categories.find(x => x.id === Number(b.dataset.edit));
-      const name = prompt('重命名分类', c.name);
+      const name = await promptInput({ title: '重命名分类', label: '分类名称', value: c.name });
       if (name && name.trim()) {
         await PUT(`/api/categories/${c.id}`, { name: name.trim() });
         await loadCategories();

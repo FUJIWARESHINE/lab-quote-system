@@ -131,6 +131,7 @@ function renderEditor() {
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <span class="hint">当前部分</span>
               <select class="select" id="curSection" style="width:180px;height:32px"></select>
+              <button class="btn btn-ghost btn-sm" id="btnRenameSection" title="修改当前部分的名称（该部分下的项目会一起改名）">${ICON.edit}重命名</button>
               <button class="btn btn-ghost btn-sm" id="btnAddSection">${ICON.plus}新增模块/部分</button>
             </div>
           </div>
@@ -223,10 +224,19 @@ function renderEditor() {
   const curSel = $('#curSection');
   if (curSel) curSel.onchange = (e) => { editor.currentSection = e.target.value; };
   const addSecBtn = $('#btnAddSection');
-  if (addSecBtn) addSecBtn.onclick = () => {
-    const name = prompt('新增模块/部分名称（可自定义，如：分子平台实验、WB 实验）', '');
-    if (!name || !name.trim()) return;
+  const renameSecBtn = $('#btnRenameSection');
+  if (renameSecBtn) renameSecBtn.onclick = () => renameSection(editor.currentSection || editor.sections[0]);
+  if (addSecBtn) addSecBtn.onclick = async () => {
+    const name = await promptInput({
+      title: '新增模块/部分',
+      label: '名称',
+      value: '',
+      placeholder: '如：分子平台实验、WB 实验',
+      hint: '新增后从左侧添加的项目将归入该部分',
+    });
+    if (name === null) return;
     const value = name.trim();
+    if (!value) return;
     if (editor.sections.indexOf(value) !== -1) return toast('该部分已存在', 'warn');
     editor.sections.push(value);
     editor.currentSection = value;
@@ -512,6 +522,32 @@ function renderSectionOptions() {
     .map(n => `<option value="${esc(n)}" ${n === cur ? 'selected' : ''}>${esc(n)}</option>`).join('');
 }
 
+/* 重命名部分：该部分下的明细一起改名，顺序与当前选中保持不变 */
+async function renameSection(name) {
+  const oldName = name || editor.currentSection || editor.sections[0];
+  if (!oldName) return;
+  const next = await promptInput({
+    title: '修改部分名称',
+    label: '部分名称',
+    value: oldName,
+    hint: '该部分下的检测项目会一并归入新名称',
+  });
+  if (next === null || next === undefined) return;
+  const value = String(next).trim();
+  if (!value) return toast('名称不能为空', 'warn');
+  if (value === oldName) return;
+  if (editor.sections.indexOf(value) !== -1) {
+    return toast(`已存在同名部分「${value}」，请换一个名称`, 'warn');
+  }
+  const hit = editor.quote.items.filter(it => sectionOf(it) === oldName);
+  editor.sections = editor.sections.map(x => (x === oldName ? value : x));
+  hit.forEach(it => { it.section = value; });
+  if (editor.currentSection === oldName) editor.currentSection = value;
+  if (editor.collapsed[oldName]) { editor.collapsed[value] = true; delete editor.collapsed[oldName]; }
+  renderDetail();
+  toast(`已重命名为「${value}」`, 'success');
+}
+
 /* 单行明细模板 */
 function qitemHtml(it, idx) {
   const pt = it.price_type || 'normal';
@@ -693,17 +729,7 @@ function renderDetail() {
       renderDetail();
     }, true);
   });
-  $$('[data-rename-sec]', $('#detailBody')).forEach(b => b.onclick = () => {
-    const name = b.dataset.renameSec;
-    const next = prompt('修改部分名称', name);
-    if (!next || !next.trim() || next.trim() === name) return;
-    const value = next.trim();
-    editor.sections = editor.sections.map(x => (x === name ? value : x));
-    editor.quote.items.forEach(it => { if (sectionOf(it) === name) it.section = value; });
-    if (editor.currentSection === name) editor.currentSection = value;
-    if (editor.collapsed[name]) { editor.collapsed[value] = true; delete editor.collapsed[name]; }
-    renderDetail();
-  });
+  $$('[data-rename-sec]', $('#detailBody')).forEach(b => b.onclick = () => renameSection(b.dataset.renameSec));
   $$('[data-edit-item]', $('#detailBody')).forEach(b => b.onclick = () => editItemDialog(Number(b.dataset.editItem)));
   $$('[data-dup]', $('#detailBody')).forEach(b => b.onclick = () => duplicateItem(Number(b.dataset.dup)));
   $$('[data-rm]', $('#detailBody')).forEach(b => b.onclick = () => {
